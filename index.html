@@ -1,0 +1,747 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="description" content="A cinematic 3D lesson on kinematics, force, Newton’s laws, and momentum.">
+<title>Motion & Forces – a cinematic physics journey</title>
+<style>
+:root { box-sizing: border-box; --sa: env(safe-area-inset-top, 0px); --sb: env(safe-area-inset-bottom, 0px); }
+*, *::before, *::after { box-sizing: inherit; }
+html, body { margin: 0; height: 100%; background: #000; color: #f2f5ff; font-family: "Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif; overflow: hidden; }
+canvas { position: fixed; inset: 0; width: 100%; height: 100%; }
+.bar { position: fixed; left: 0; right: 0; background: #000; z-index: 2; }
+#bt { top: 0; height: calc(var(--sa) + 4vh); }
+#bb { bottom: 0; height: calc(var(--sb) + 64px); display: flex; align-items: center; justify-content: center; gap: 10px; }
+#bb button { font-size: 20px; width: 46px; height: 42px; border-radius: 21px; border: 1px solid #ffffff44; background: #ffffff14; color: #fff; touch-action: manipulation; cursor: pointer; }
+#info { position: fixed; z-index: 3; left: 14px; right: 14px; top: calc(var(--sa) + 4vh + 8px); text-shadow: 0 1px 6px #000; pointer-events: none; }
+#ttl { font-size: clamp(18px, 4.5vw, 30px); font-weight: 700; letter-spacing: .01em; }
+#eq { font-family: Cambria, "Palatino Linotype", Palatino, Georgia, serif; font-size: clamp(14px, 3.5vw, 20px); color: #ffcf6b; margin-top: 2px; }
+#leg { font: 12px/1.45 Consolas, Menlo, monospace; color: #d7ecff; margin-top: 6px; }
+#hud { font: 12px/1.5 Consolas, Menlo, monospace; color: #bfe8ff; white-space: pre-wrap; margin-top: 6px; }
+#cap { position: fixed; z-index: 3; left: 50%; transform: translateX(-50%); bottom: calc(var(--sb) + 76px); width: min(92vw, 760px); text-align: center; font-size: clamp(15px, 4vw, 22px); line-height: 1.4; text-shadow: 0 2px 8px #000, 0 0 3px #000; min-height: 3em; }
+#start { position: fixed; inset: 0; z-index: 9; display: flex; align-items: center; justify-content: center; text-align: center; padding: 24px; background: radial-gradient(circle at 50% 30%, #1b2a66cc, #02040bf2); }
+#start h1 { font-size: clamp(34px, 9vw, 64px); margin: 0 0 8px; font-weight: 800; }
+#start p { max-width: 540px; margin: 8px auto; color: #cfd8ff; line-height: 1.5; }
+#start button { display: block; margin: 14px auto; width: min(86vw, 340px); padding: 16px; border-radius: 16px; border: 0; font-size: 20px; font-weight: 700; cursor: pointer; touch-action: manipulation; }
+#bk { background: #ffb020; color: #1a1200; }
+#be { background: #19d3ff; color: #001018; }
+#start small { font-weight: 500; font-size: 13px; }
+.hint { color: #9aa6d6; font-size: 12px; }
+button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="bar" id="bt"></div>
+<div class="bar" id="bb">
+  <button type="button" id="hm" title="Menu" aria-label="Menu">⌂</button>
+  <button type="button" id="pv" aria-label="Previous scene">⏮</button>
+  <button type="button" id="pp" aria-label="Pause">⏸</button>
+  <button type="button" id="nx" aria-label="Next scene">⏭</button>
+  <button type="button" id="mu" aria-label="Sound">🔊</button>
+</div>
+<div id="info">
+  <div id="ttl"></div>
+  <div id="eq"></div>
+  <div id="leg"></div>
+  <div id="hud"></div>
+</div>
+<div id="cap" aria-live="polite"></div>
+<div id="start">
+  <div>
+    <h1>Motion & Forces</h1>
+    <p>A cinematic 3D journey through kinematics, force, momentum and Newton’s three laws.</p>
+    <button type="button" id="bk">🚀 Explorer<br><small>Primary school, age 9 and up</small></button>
+    <button type="button" id="be">⚙️ Engineer<br><small>High school and engineering</small></button>
+    <p id="sm">Turn your sound up. The narration uses the natural voice built into your device.</p>
+    <p class="hint">Space pauses · arrow keys change scene · M mutes · Esc returns here</p>
+  </div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/* Idealizations used by the live model:
+   - Carts have no rolling resistance. The only horizontal force is the scripted F.
+   - Mass is constant, so ΣF = ma, and ΣF = 0 means v is constant.
+   - The third-law push is one equal-and-opposite pair, on two different carts.
+   - The crash is a 1D elastic collision of an isolated pair (restitution = 1).
+   - No friction between ball and cart. The bumper is lower than the ball, so only the cart is stopped.
+   - g = 9.8 m/s². Once the ball is on the ground, kinetic friction uses μ = 0.12.
+*/
+const $ = id => document.getElementById(id);
+const G = 9.8, BALL_R = 0.35, MU = 0.12;
+const BREAKS = [0.6, 0.9, 3, 6, 9];
+let mode = "k", paused = false, muted = false, idx = 0, token = 0;
+let simT = 0, simGo = false, running = false, sceneT = 0;
+let voice = null, AC = null, master, wg, wbp;
+let cs = [], objs = [], ball = null, hit = false, lastMark = -1, parts = [], impactJ = null;
+
+const R = new THREE.WebGLRenderer({ antialias: true });
+R.setPixelRatio(Math.min(devicePixelRatio, 2));
+R.shadowMap.enabled = true;
+document.body.prepend(R.domElement);
+const S = new THREE.Scene(), C = new THREE.PerspectiveCamera(50, 1, .1, 500);
+function rs() {
+  R.setSize(innerWidth, innerHeight);
+  C.aspect = innerWidth / innerHeight;
+  C.fov = C.aspect < 1 ? 72 : 50;
+  C.updateProjectionMatrix();
+}
+addEventListener("resize", rs);
+rs();
+S.add(new THREE.HemisphereLight(0xaac8ff, 0x223344, .9));
+const sun = new THREE.DirectionalLight(0xffffff, 1.1);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+const sc_ = sun.shadow.camera;
+sc_.left = -30; sc_.right = 30; sc_.top = 30; sc_.bottom = -30; sc_.far = 80;
+S.add(sun, sun.target);
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(500, 70), new THREE.MeshStandardMaterial({ roughness: .8 }));
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+ground.position.x = 100;
+S.add(ground);
+let grid;
+const sg = new Float32Array(1800);
+for (let i = 0; i < 600; i++) {
+  const a = Math.random() * 6.28, e = Math.random() * 1.3 + .15, r = 200;
+  sg[i * 3] = Math.cos(a) * Math.cos(e) * r + 60;
+  sg[i * 3 + 1] = Math.sin(e) * r;
+  sg[i * 3 + 2] = Math.sin(a) * Math.cos(e) * r;
+}
+const sgeo = new THREE.BufferGeometry();
+sgeo.setAttribute("position", new THREE.BufferAttribute(sg, 3));
+S.add(new THREE.Points(sgeo, new THREE.PointsMaterial({ color: 0xffffff, size: 2, sizeAttenuation: false, fog: false })));
+
+function label(txt, sx, col) {
+  const c = document.createElement("canvas");
+  c.width = 256; c.height = 64;
+  const g = c.getContext("2d");
+  g.fillStyle = "rgba(0,0,0,.55)";
+  g.fillRect(0, 0, 256, 64);
+  g.fillStyle = col || "#fff";
+  g.font = "bold 36px sans-serif";
+  g.textAlign = "center";
+  g.textBaseline = "middle";
+  g.fillText(txt, 128, 34);
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthWrite: false }));
+  s.scale.set(sx, sx / 4, 1);
+  return s;
+}
+for (let x = -20; x <= 140; x += 10) {
+  const p = new THREE.Mesh(new THREE.CylinderGeometry(.08, .08, 2, 8), new THREE.MeshBasicMaterial({ color: 0x66e0ff }));
+  p.position.set(x, 1, -4.5);
+  S.add(p);
+  const l = label(x + " m", 2.4);
+  l.position.set(x, 2.5, -4.5);
+  S.add(l);
+}
+
+function applyMode() {
+  const k = mode === "k";
+  S.background = new THREE.Color(k ? 0x1a1f5c : 0x03050b);
+  S.fog = new THREE.Fog(k ? 0x1a1f5c : 0x03050b, 25, 170);
+  ground.material.color.set(k ? 0x2cb59a : 0x0c1424);
+  if (grid) S.remove(grid);
+  grid = new THREE.GridHelper(300, 300, k ? 0xffffff : 0x1e6fff, k ? 0x7ff0d8 : 0x12305f);
+  grid.position.set(100, .02, 0);
+  S.add(grid);
+}
+
+function mkCart(c) {
+  const s = Math.cbrt(c.m) * .7, g = new THREE.Group(), col = new THREE.Color(c.color);
+  c.s = s;
+  c.h = .9 * s;
+  const mt = new THREE.MeshStandardMaterial({ color: col, emissive: col, emissiveIntensity: .3, metalness: .3, roughness: .4 });
+  const b = new THREE.Mesh(new THREE.BoxGeometry(1.8 * s, .7 * s, 1.1 * s), mt);
+  b.position.y = .6 * s;
+  b.castShadow = true;
+  g.add(b);
+  c.wh = [];
+  for (const dx of [-.6, .6]) for (const dz of [-.6, .6]) {
+    const w = new THREE.Mesh(new THREE.CylinderGeometry(.28 * s, .28 * s, .18 * s, 16).rotateX(Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x151515 }));
+    w.position.set(dx * s, .28 * s, dz * s);
+    const st = new THREE.Mesh(new THREE.BoxGeometry(.5 * s, .06 * s, .2 * s), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    w.add(st);
+    g.add(w);
+    c.wh.push(w);
+  }
+  if (mode === "k") for (const dz of [-.25, .25]) {
+    const e = new THREE.Mesh(new THREE.SphereGeometry(.17 * s, 12, 12), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    e.position.set(.9 * s, .75 * s, dz * s);
+    const p = new THREE.Mesh(new THREE.SphereGeometry(.08 * s, 8, 8), new THREE.MeshBasicMaterial({ color: 0x000000 }));
+    p.position.set(.09 * s, 0, 0);
+    e.add(p);
+    g.add(e);
+  }
+  const l = label(c.name + " · " + c.m + " kg", 2.6);
+  l.position.y = 1.9 * s + .6;
+  g.add(l);
+  c.g = g;
+  S.add(g);
+  const mk = (color) => {
+    const a = new THREE.ArrowHelper(new THREE.Vector3(1, 0, 0), new THREE.Vector3(), 1, color, .4, .22);
+    a.visible = false;
+    S.add(a);
+    return a;
+  };
+  c.aF = mk(0xff3b3b);
+  c.aV = mk(0x39ff7a);
+  c.aP = mk(0xffd23b);
+  c.F = 0;
+  c.a = 0;
+}
+
+const SC = [
+  {
+    t: ["Motion: how things move", "Kinematics"],
+    eq: ["Speeding up is called acceleration", "v = v₀ + at     x = x₀ + v₀t + ½at²"],
+    carts: [{ m: 1, x: 0, v: 0, z: 0, color: 0xff4d4d, name: "Red" }],
+    F: () => 2, dur: 8, cam: [12, 3.5, .9, .04], off: -4, mark: 1, go: 2, hideF: 1,
+    lines: {
+      k: [
+        "Hello, explorer! Today we are going on an adventure into the science of motion.",
+        "Kinematics is a big word that just means describing how things move: how far they go, how fast, and how quickly they speed up.",
+        "Watch the red cart! It starts still, then zooms faster and faster. See how the glowing dots spread farther apart every second? That is called acceleration."
+      ],
+      e: [
+        "Kinematics names the motion itself: position, velocity and acceleration. It does not, by itself, ask which force caused it.",
+        "This cart starts from rest. A constant net force of 2 newtons on a mass of 1 kilogram produces a constant acceleration of 2 meters per second squared.",
+        "Velocity grows linearly, v equals v naught plus a t, and displacement grows as x naught plus v naught t plus one half a t squared. Markers each second sit at 0, 1, 4, 9, 16 meters, so the gaps grow by 2 meters every second, which is a."
+      ]
+    }
+  },
+  {
+    t: ["Force: a push or a pull", "Force"],
+    eq: ["Push, glide, then brake", "F = 6 N for 3 s, then 0, then −6 N for 3 s"],
+    carts: [{ m: 2, x: 0, v: 0, z: 0, color: 0xff9f1c, name: "Cart" }],
+    F: (i, t) => t < 3 ? 6 : t < 6 ? 0 : t < 9 ? -6 : 0,
+    dur: 9, cam: [11, 3, 1.2, -.03], off: 2, go: 1,
+    lines: {
+      k: [
+        "So what makes things move? A force! A force is simply a push or a pull.",
+        "Look at the red arrow. When we push, the cart speeds up. When we stop pushing, it just glides along. And when we push backward, it slows down and stops.",
+        "A bigger force changes the motion more!"
+      ],
+      e: [
+        "A force is a vector interaction that changes an object’s momentum. Red is the net force, green is velocity, and yellow is momentum.",
+        "A six newton push on a two kilogram cart gives three meters per second squared. Once the push ends, velocity stays constant, until an equal braking force brings the cart to rest. Final speed is zero and the stop is at 54 meters."
+      ]
+    }
+  },
+  {
+    t: ["Newton’s First Law: inertia", "Newton’s First Law"],
+    eq: ["Things keep doing what they are doing", "ΣF = 0 and m constant ⇒ v = constant"],
+    carts: [{ m: 2, x: -6, v: 6, z: 0, color: 0x39a0ff, name: "Cart" }],
+    F: () => 0, dur: 7, cam: [16, 3.5, 1.3, 0], fx: 6, barrier: 14, go: 1,
+    lines: {
+      k: [
+        "Newton’s first law says: things keep doing what they are already doing, unless a force changes it. We call this inertia.",
+        "The cart rolls along with a yellow ball on top. It hits the low wall and stops. The ball sails over, because nothing pushed the ball.",
+        "That is why you lean forward when a car brakes suddenly. Buckle up!"
+      ],
+      e: [
+        "Newton’s first law: a body keeps its state of rest or uniform motion unless a net external force acts on it. With constant mass, that means velocity itself stays constant.",
+        "The cart carries a free ball, and the bumper is lower than the ball. The bumper’s impulse stops the cart only. With no horizontal force on the ball, its horizontal velocity stays at the cart’s old 6 meters per second, and gravity pulls it into a projectile path.",
+        "Inertia is the tendency to resist changes in velocity, and mass is its measure."
+      ]
+    }
+  },
+  {
+    t: ["Newton’s Second Law: F = ma", "Newton’s Second Law"],
+    eq: ["Same push, different mass", "F = ma     a = F / m"],
+    carts: [
+      { m: 1, x: 0, v: 0, z: -1.7, color: 0x4de1ff, name: "Light" },
+      { m: 4, x: 0, v: 0, z: 1.7, color: 0xb06bff, name: "Heavy" }
+    ],
+    F: () => 3, dur: 4.5, cam: [13, 4, .8, .03], go: 1,
+    lines: {
+      k: [
+        "Newton’s second law is about a push and mass.",
+        "Here are two carts, a small light one and a big heavy one. We give them exactly the same push. Who wins the race? The light one, easily! The more mass something has, the harder it is to speed up.",
+        "A bigger push means more speeding up. More mass means less speeding up. Weight is gravity pulling down. This law is about mass, not weight."
+      ],
+      e: [
+        "Newton’s second law: the net force equals mass times acceleration, F equals m a. Weight is m g, a different quantity, and it is cancelled here by the track.",
+        "Both carts receive the same three newton force. The one kilogram cart accelerates at three meters per second squared, the four kilogram cart at only zero point seven five.",
+        "Acceleration is directly proportional to force and inversely proportional to mass."
+      ]
+    }
+  },
+  {
+    t: ["Newton’s Third Law: action and reaction", "Newton’s Third Law"],
+    eq: ["Every push has an equal push back", "F(A on B) = − F(B on A)"],
+    carts: [
+      { m: 1, x: 0, v: 0, z: 0, color: 0xff4d6d, name: "Small" },
+      { m: 3, x: 0, v: 0, z: 0, color: 0xffc233, name: "Big" }
+    ],
+    F: (i, t) => (t >= .6 && t < .9) ? (i ? 20 : -20) : 0,
+    dur: 5.5, cam: [10, 3, .6, .05], go: 1, touch: 1,
+    lines: {
+      k: [
+        "Newton’s third law: every push has an equal push back, in the opposite direction.",
+        "Two carts are touching. When they push on each other, both move away! The red arrows are the same size, but they point in opposite directions.",
+        "The small cart zooms off faster because it has less mass. That is how rockets fly: they push gas one way, and the gas pushes the rocket the other way."
+      ],
+      e: [
+        "Newton’s third law: if body A exerts a force on body B, then B exerts an equal and opposite force on A. The two forces act on different bodies, so they do not cancel.",
+        "Here the forces are twenty newtons for three tenths of a second. The impulse on each cart is six newton seconds, outward.",
+        "The one kilogram cart leaves at minus six meters per second and the three kilogram cart at plus two. Total momentum stays zero."
+      ]
+    }
+  },
+  {
+    t: ["Momentum: the oomph of motion", "Momentum and collisions"],
+    eq: ["Heavy and fast means lots of oomph", "p = mv     Σp before = Σp after, if isolated"],
+    carts: [
+      { m: 3, x: -16, v: 5, z: 0, color: 0xff4d4d, name: "Heavy" },
+      { m: 1, x: 0, v: 0, z: 0, color: 0x4da3ff, name: "Small" }
+    ],
+    F: () => 0, dur: 7, cam: [11, 3.5, 1, .04], hit: 1, go: 1,
+    lines: {
+      k: [
+        "Now, momentum! Momentum is how much oomph a moving thing has. It depends on its mass and how fast it goes.",
+        "A heavy red cart rolls toward a small blue one. Crash! The heavy cart hands some of its oomph to the little cart, and off it zooms. The total oomph stays the same before and after. Scientists say momentum is conserved.",
+        "You just learned the rules that decide how things move, push, and crash. Great job, explorer!"
+      ],
+      e: [
+        "Momentum is mass times velocity, p equals m v, and the general second law says net force is the rate of change of momentum.",
+        "A three kilogram cart at five meters per second strikes a stationary one kilogram cart in a one-dimensional elastic collision. Total momentum, fifteen kilogram meters per second, and kinetic energy are both conserved, because no external horizontal force acts and the collision is elastic.",
+        "Afterwards the heavy cart moves at two point five meters per second and the light one at seven point five. Check: three times two point five, plus one times seven point five, equals fifteen."
+      ]
+    }
+  }
+];
+
+function num(x, d) {
+  if (!isFinite(x)) return "?";
+  if (Math.abs(x) < 0.5 * Math.pow(10, -d)) x = 0;
+  let s = x.toFixed(d);
+  if (/^-0(?:\.0+)?$/.test(s)) s = s.slice(1);
+  return s;
+}
+function cartTop(c) { return 0.95 * c.s; }
+
+function loadScene(i) {
+  idx = i;
+  const sc = SC[i];
+  objs.forEach(o => S.remove(o));
+  objs = [];
+  cs.forEach(c => S.remove(c.g, c.aF, c.aV, c.aP));
+  parts.forEach(p => S.remove(p.m));
+  parts = [];
+  cs = sc.carts.map(d => Object.assign({}, d));
+  cs.forEach(mkCart);
+  if (sc.touch && cs.length === 2) {
+    const sep = cs[0].h + cs[1].h;
+    cs[0].x = -sep / 2;
+    cs[1].x = sep / 2;
+  }
+  hit = false;
+  lastMark = -1;
+  ball = null;
+  impactJ = null;
+  simT = 0;
+  simGo = false;
+  sceneT = 0;
+  if (sc.barrier) {
+    const bh = 0.62;
+    const b = new THREE.Mesh(new THREE.BoxGeometry(.5, bh, 3.4), new THREE.MeshStandardMaterial({ color: 0xff7a1a, emissive: 0xff7a1a, emissiveIntensity: .35 }));
+    b.position.set(sc.barrier + .25, bh / 2, 0);
+    b.castShadow = true;
+    S.add(b);
+    objs.push(b);
+    const lab = label("bumper", 2.3, "#ffe7c2");
+    lab.position.set(sc.barrier + .25, 1.05, 2.4);
+    S.add(lab);
+    objs.push(lab);
+    const m = new THREE.Mesh(new THREE.SphereGeometry(BALL_R, 20, 20), new THREE.MeshStandardMaterial({ color: 0xffe14d, emissive: 0xffc400, emissiveIntensity: .4 }));
+    m.castShadow = true;
+    S.add(m);
+    objs.push(m);
+    ball = { m, x: cs[0].x, y: cartTop(cs[0]) + BALL_R, vx: cs[0].v, vy: 0, ride: true };
+    m.position.set(ball.x, ball.y, 0);
+  }
+  const k = mode === "k" ? 0 : 1;
+  $("ttl").textContent = sc.t[k];
+  $("eq").textContent = sc.eq[k];
+}
+
+function spark(x, y, z, n, col) {
+  for (let i = 0; i < n; i++) {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(.07, 6, 6), new THREE.MeshBasicMaterial({ color: col }));
+    m.position.set(x, y, z);
+    S.add(m);
+    parts.push({ m, v: new THREE.Vector3((Math.random() - .5) * 6, Math.random() * 5, (Math.random() - .5) * 6), l: 1 });
+  }
+}
+
+function flyBall(h) {
+  let left = h, guard = 0;
+  while (left > 1e-8 && guard++ < 8000) {
+    const h1 = Math.min(left, 1 / 120);
+    const vy0 = ball.vy;
+    ball.vy = vy0 - G * h1;
+    ball.x += ball.vx * h1;
+    ball.y += vy0 * h1 - 0.5 * G * h1 * h1;
+    if (ball.y < BALL_R) {
+      ball.y = BALL_R;
+      ball.vy = Math.abs(ball.vy) > 1 ? -ball.vy * .45 : 0;
+    }
+    if (ball.y <= BALL_R + 1e-6) {
+      const dec = MU * G * h1;
+      if (Math.abs(ball.vx) <= dec) ball.vx = 0;
+      else ball.vx -= Math.sign(ball.vx) * dec;
+    }
+    left -= h1;
+  }
+}
+
+function physics(h) {
+  const sc = SC[idx], t0 = simT;
+  const saved = cs.map(c => ({ x: c.x, v: c.v }));
+  cs.forEach((c, i) => {
+    c.F = sc.F(i, t0);
+    c.a = c.F / c.m;
+    const v0 = c.v;
+    c.v = v0 + c.a * h;
+    c.x = c.x + v0 * h + 0.5 * c.a * h * h;
+  });
+  if (sc.mark) {
+    const t1 = t0 + h, a0 = cs[0].a, x0 = saved[0].x, v0 = saved[0].v;
+    for (let k = Math.floor(t0 + 1e-9); k <= Math.floor(t1 + 1e-9); k++) {
+      if (k <= lastMark || k < t0 - 1e-9 || k > t1 + 1e-9 || k > sc.dur + 1e-9) continue;
+      lastMark = k;
+      const dt = k - t0, x = x0 + v0 * dt + 0.5 * a0 * dt * dt;
+      const m = new THREE.Mesh(new THREE.SphereGeometry(.22, 12, 12), new THREE.MeshBasicMaterial({ color: 0xffe14d }));
+      m.position.set(x, .12, 1.3);
+      S.add(m);
+      objs.push(m);
+      if (k > 0) blip();
+    }
+  }
+  if (sc.barrier && ball) {
+    const c = cs[0], limit = sc.barrier - c.h;
+    if (ball.ride) {
+      const x0 = saved[0].x, v0 = saved[0].v, a0 = c.a;
+      let tHit = null;
+      if (v0 > 0 || a0 !== 0) {
+        if (Math.abs(a0) < 1e-12) {
+          if (v0 > 1e-8 && x0 <= limit && x0 + v0 * h >= limit - 1e-9) tHit = (limit - x0) / v0;
+        } else {
+          const A = 0.5 * a0, B = v0, C = x0 - limit, disc = B * B - 4 * A * C;
+          if (disc >= 0) {
+            const s = Math.sqrt(disc);
+            for (const t of [(-B - s) / (2 * A), (-B + s) / (2 * A)]) {
+              if (t >= -1e-8 && t <= h + 1e-8) tHit = tHit == null ? Math.max(0, t) : Math.min(tHit, Math.max(0, t));
+            }
+          }
+        }
+      }
+      if (tHit != null) {
+        tHit = Math.min(h, Math.max(0, tHit));
+        const vHit = v0 + a0 * tHit;
+        impactJ = -c.m * vHit;
+        ball.vx = vHit;
+        ball.vy = 0;
+        ball.ride = false;
+        ball.x = limit;
+        ball.y = cartTop(c) + BALL_R;
+        c.x = limit;
+        c.v = 0;
+        c.a = 0;
+        c.F = 0;
+        thump(70, .9);
+        spark(sc.barrier, .4, 0, 24, 0xffa040);
+        if (h - tHit > 1e-8) flyBall(h - tHit);
+      } else {
+        ball.x = c.x;
+        ball.y = cartTop(c) + BALL_R;
+        ball.vx = c.v;
+        ball.vy = 0;
+      }
+    } else {
+      if (c.x > limit) c.x = limit;
+      if (c.v > 0) c.v = 0;
+      flyBall(h);
+    }
+  }
+  if (sc.hit && !hit) {
+    const [A, B] = cs;
+    const overlap = (A.x + A.h) - (B.x - B.h);
+    if (overlap >= -1e-8 && saved[0].v > saved[1].v) {
+      const m1 = A.m, m2 = B.m, u1 = saved[0].v, u2 = saved[1].v, tot = m1 + m2;
+      if (overlap > 0) {
+        A.x -= overlap * (m2 / tot);
+        B.x += overlap * (m1 / tot);
+      }
+      A.v = (m1 - m2) / tot * u1 + (2 * m2) / tot * u2;
+      B.v = (2 * m1) / tot * u1 + (m2 - m1) / tot * u2;
+      hit = true;
+      thump(80, 1);
+      spark(A.x + A.h, 1, 0, 30, 0xffd23b);
+    }
+  }
+}
+
+function advance(dt) {
+  const MAX_H = 1 / 120;
+  let left = dt, guard = 0;
+  while (left > 1e-8 && guard++ < 200000) {
+    let h = Math.min(left, MAX_H);
+    const t = simT;
+    for (const b of BREAKS) {
+      const d = b - t;
+      if (d > 1e-8 && d < h) h = d;
+    }
+    physics(h);
+    simT += h;
+    for (const b of BREAKS) if (Math.abs(simT - b) < 1e-8) simT = b;
+    if (Math.abs(simT - Math.round(simT)) < 1e-8) simT = Math.round(simT);
+    left -= h;
+  }
+}
+
+const _dir = new THREE.Vector3();
+function arrow(a, val, k, x, y, z) {
+  const L = Math.abs(val) * k;
+  if (L < .12) { a.visible = false; return; }
+  a.visible = true;
+  a.position.set(x, y, z);
+  _dir.set(Math.sign(val), 0, 0);
+  a.setDirection(_dir);
+  a.setLength(Math.min(L, 9), Math.min(.4, L * .5), .2);
+}
+
+const clk = new THREE.Clock(), fo = new THREE.Vector3(), tp = new THREE.Vector3();
+let fx = 0;
+function loop() {
+  requestAnimationFrame(loop);
+  const dt = Math.min(clk.getDelta(), .05), sc = SC[idx];
+  if (running && !paused && simGo && simT < sc.dur - 1e-8) advance(Math.min(dt, sc.dur - simT));
+  if (!paused) sceneT += dt;
+  let mv = 0;
+  const e = mode === "e";
+  cs.forEach(c => {
+    c.g.position.set(c.x, 0, c.z);
+    c.wh.forEach(w => w.rotation.z -= c.v * dt / (.28 * c.s));
+    mv = Math.max(mv, Math.abs(c.v));
+    const y = 1.9 * c.s + 1.1;
+    const showF = !(sc.hideF && !e);
+    arrow(c.aF, showF ? c.F : 0, .35, c.x, y, c.z);
+    arrow(c.aV, e ? c.v : 0, .25, c.x, y + .55, c.z);
+    arrow(c.aP, e ? c.m * c.v : 0, .08, c.x, y + 1.1, c.z);
+  });
+  if (ball) {
+    if (ball.ride && cs[0]) {
+      ball.x = cs[0].x;
+      ball.y = cartTop(cs[0]) + BALL_R;
+    }
+    ball.m.position.set(ball.x, ball.y, 0);
+  }
+  parts = parts.filter(p => {
+    p.l -= dt;
+    p.v.y -= G * dt;
+    p.m.position.addScaledVector(p.v, dt);
+    if (p.l <= 0 || p.m.position.y < 0) { S.remove(p.m); return false; }
+    return true;
+  });
+  let tx = sc.fx !== undefined ? sc.fx : cs.reduce((s, c) => s + c.x, 0) / cs.length + (sc.off || 0);
+  fx += (tx - fx) * .07;
+  const sp = cs.length > 1 ? Math.abs(cs[0].x - cs[1].x) : 0;
+  const r = Math.min(sc.cam[0] + sp * .6, 32), a = sc.cam[2] + sc.cam[3] * sceneT;
+  tp.set(fx + r * Math.sin(a), sc.cam[1] + sp * .12, r * Math.cos(a));
+  C.position.lerp(tp, .06);
+  fo.lerp(new THREE.Vector3(fx, 1, 0), .1);
+  C.lookAt(fo);
+  sun.position.set(fx + 12, 22, 10);
+  sun.target.position.set(fx, 0, 0);
+  if (AC) { wg.gain.value = Math.min(.22, mv * .025); wbp.frequency.value = 300 + mv * 90; }
+  hud();
+  R.render(S, C);
+}
+
+function hud() {
+  const sc = SC[idx];
+  if (!running) { $("hud").textContent = ""; $("leg").textContent = ""; return; }
+  const e = mode === "e";
+  if (!e) {
+    let s = "";
+    cs.forEach(c => {
+      const dir = c.v > .05 ? "→" : c.v < -.05 ? "←" : "·";
+      s += c.name + " " + dir + " " + "▮".repeat(Math.min(16, Math.round(Math.abs(c.v)))) + " " + Math.abs(c.v).toFixed(1) + " m/s\n";
+    });
+    if (ball && !ball.ride) s += "Ball " + (ball.vx > .05 ? "→ " : "") + Math.hypot(ball.vx, ball.vy).toFixed(1) + " m/s\n";
+    $("hud").textContent = s;
+    $("leg").textContent = sc.hideF ? "" : "Red arrow = force";
+    return;
+  }
+  let s = "t = " + num(simT, 2) + " s\n";
+  cs.forEach(c => {
+    s += c.name + ": m=" + c.m + " kg  x=" + num(c.x, 2) + " m  v=" + num(c.v, 2) + " m/s  a=" + num(c.a, 2) + " m/s²  F=" + num(c.F, 2) + " N  p=" + num(c.m * c.v, 2) + "\n";
+  });
+  const P = cs.reduce((t, c) => t + c.m * c.v, 0);
+  const KE = cs.reduce((t, c) => t + 0.5 * c.m * c.v * c.v, 0);
+  s += "Σp = " + num(P, 2) + " kg·m/s    KE = " + num(KE, 2) + " J";
+  if (ball) {
+    s += "\nBall: x=" + num(ball.x, 2) + " m  vx=" + num(ball.vx, 2) + " m/s  vy=" + num(ball.vy, 2) + " m/s  g=" + G + " m/s²" + (ball.ride ? "  riding" : "  free");
+    if (impactJ != null) s += "\nBumper impulse on cart = " + num(impactJ, 2) + " N·s   (ball’s horizontal p unchanged)";
+  }
+  $("hud").textContent = s;
+  $("leg").textContent = "Red = force (N)    Green = velocity (m/s)    Yellow = momentum (kg·m/s)";
+}
+
+function audioInit() {
+  if (AC) return;
+  AC = new (window.AudioContext || window.webkitAudioContext)();
+  master = AC.createGain();
+  master.gain.value = muted ? 0 : .6;
+  master.connect(AC.destination);
+  const f = AC.createBiquadFilter();
+  f.type = "lowpass";
+  f.frequency.value = 420;
+  f.connect(master);
+  [55, 82.4, 110.3].forEach((fr, i) => {
+    const o = AC.createOscillator();
+    o.type = i ? "sine" : "sawtooth";
+    o.frequency.value = fr;
+    const g = AC.createGain();
+    g.gain.value = .04;
+    o.connect(g); g.connect(f); o.start();
+  });
+  const b = AC.createBuffer(1, AC.sampleRate * 2, AC.sampleRate), d = b.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  const n = AC.createBufferSource();
+  n.buffer = b; n.loop = true;
+  wbp = AC.createBiquadFilter();
+  wbp.type = "bandpass";
+  wg = AC.createGain();
+  wg.gain.value = 0;
+  n.connect(wbp); wbp.connect(wg); wg.connect(master); n.start();
+}
+function tone(f, d, v, type, df) {
+  if (!AC) return;
+  const o = AC.createOscillator(), g = AC.createGain();
+  o.type = type || "sine";
+  o.frequency.setValueAtTime(f, AC.currentTime);
+  if (df) o.frequency.exponentialRampToValueAtTime(df, AC.currentTime + d);
+  g.gain.setValueAtTime(v, AC.currentTime);
+  g.gain.exponentialRampToValueAtTime(.001, AC.currentTime + d);
+  o.connect(g); g.connect(master); o.start(); o.stop(AC.currentTime + d);
+}
+const thump = (f, v) => tone(f * 1.6, .5, v, "triangle", f * .4), blip = () => tone(880, .25, .12);
+
+function pick() {
+  const v = (speechSynthesis.getVoices() || []).filter(x => /^en/i.test(x.lang));
+  for (const p of [/natural|neural|online/i, /google uk english female|google us english/i, /samantha|serena|karen|moira|aria|jenny|daniel/i]) {
+    const m = v.find(x => p.test(x.name));
+    if (m) return m;
+  }
+  return v[0] || null;
+}
+if (window.speechSynthesis) { speechSynthesis.onvoiceschanged = () => voice = pick(); voice = pick(); }
+const sleep = async (ms, my) => {
+  for (let t = 0; t < ms; t += 100) {
+    await new Promise(r => setTimeout(r, 100));
+    while (paused) await new Promise(r => setTimeout(r, 150));
+    if (my !== undefined && my !== token) return;
+  }
+};
+function say(txt, my) {
+  return new Promise(res => {
+    let done = false;
+    const fin = () => { if (!done) { done = true; res(); } };
+    const ms = txt.length * 75 + 800;
+    if (muted || !window.speechSynthesis) { sleep(ms, my).then(fin); return; }
+    const ps = txt.match(/[^.!?]+[.!?]*/g) || [txt];
+    let i = 0;
+    const next = () => {
+      if (my !== token || i >= ps.length) return fin();
+      const p = ps[i++].trim();
+      if (!p) return next();
+      const u = new SpeechSynthesisUtterance(p);
+      if (voice) { u.voice = voice; u.lang = voice.lang; }
+      u.rate = mode === "k" ? 0.93 : 0.98;
+      u.pitch = /\?$/.test(p) ? 1.1 : /!$/.test(p) ? 1.08 : 1 + (Math.random() - .5) * .04;
+      u.onend = () => setTimeout(next, /[.!?]$/.test(p) ? 260 : 120);
+      u.onerror = fin;
+      speechSynthesis.speak(u);
+    };
+    next();
+    sleep(ms * 2 + 3000, my).then(fin);
+  });
+}
+async function play(i) {
+  const my = ++token;
+  if (window.speechSynthesis) speechSynthesis.cancel();
+  loadScene(i);
+  const sc = SC[i], L = sc.lines[mode];
+  for (let li = 0; li < L.length; li++) {
+    if (my !== token) return;
+    if (li === sc.go) simGo = true;
+    $("cap").textContent = L[li];
+    await say(L[li], my);
+    if (my !== token) return;
+    await sleep(300, my);
+  }
+  while (simT < sc.dur && my === token) await sleep(200, my);
+  if (my !== token) return;
+  await sleep(900, my);
+  if (my !== token) return;
+  if (i + 1 < SC.length) play(i + 1);
+  else {
+    running = false;
+    $("cap").textContent = "";
+    $("sm").textContent = "Journey complete! Replay it, or try the other version.";
+    $("start").style.display = "flex";
+  }
+}
+function start(m) {
+  mode = m;
+  applyMode();
+  paused = false;
+  $("pp").textContent = "⏸";
+  $("start").style.display = "none";
+  running = true;
+  audioInit();
+  if (AC.state === "suspended") AC.resume();
+  play(0);
+}
+$("bk").onclick = () => start("k");
+$("be").onclick = () => start("e");
+$("pp").onclick = () => {
+  if (!running) return;
+  paused = !paused;
+  $("pp").textContent = paused ? "▶" : "⏸";
+  if (window.speechSynthesis) paused ? speechSynthesis.pause() : speechSynthesis.resume();
+};
+$("pv").onclick = () => running && play(Math.max(0, idx - 1));
+$("nx").onclick = () => running && play(Math.min(SC.length - 1, idx + 1));
+$("mu").onclick = () => {
+  muted = !muted;
+  $("mu").textContent = muted ? "🔇" : "🔊";
+  if (master) master.gain.value = muted ? 0 : .6;
+  if (muted && window.speechSynthesis) speechSynthesis.cancel();
+};
+$("hm").onclick = () => {
+  token++;
+  running = false;
+  paused = false;
+  if (window.speechSynthesis) speechSynthesis.cancel();
+  $("cap").textContent = "";
+  $("start").style.display = "flex";
+};
+addEventListener("keydown", e => {
+  if (e.code === "Space" && document.activeElement && document.activeElement.tagName === "BUTTON") return;
+  if (e.key === "ArrowRight") $("nx").click();
+  else if (e.key === "ArrowLeft") $("pv").click();
+  else if (e.code === "Space") { e.preventDefault(); $("pp").click(); }
+  else if (e.key === "m" || e.key === "M") $("mu").click();
+  else if (e.key === "Escape") $("hm").click();
+});
+applyMode();
+loadScene(0);
+loop();
+</script>
+</body>
+</html>
